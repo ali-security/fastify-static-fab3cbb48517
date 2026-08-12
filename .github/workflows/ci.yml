@@ -1,18 +1,7 @@
 name: CI
 
 on:
-  push:
-    branches:
-     - main
-     - next
-     - 'v*'
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
+  workflow_dispatch: {}
 
 # This allows a subsequently queued workflow run to interrupt previous runs
 concurrency:
@@ -22,12 +11,119 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  NPM_CONFIG_REGISTRY: https://:2025-10-17T16%3A23%3A14.459Z@time-machines-npm.sealsecurity.io/
+
 jobs:
-  test:
+  # Inlined from fastify/workflows/.github/workflows/nested-quality.yml@v5
+  # (license-check: true, lint: true). The dependency-review job is
+  # pull_request-only and can never run from a dispatch, so it is dropped.
+  license-check:
+    name: Check Licenses
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
-      contents: write
-      pull-requests: write
-    uses: fastify/workflows/.github/workflows/plugins-ci.yml@v5
-    with:
-      license-check: true
-      lint: true
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          check-latest: true
+          node-version: lts/*
+
+      - name: Install dependencies
+        run: npm i --ignore-scripts
+
+      - name: Check Licenses
+        run: npx license-checker --production --summary --onlyAllow="0BSD;Apache-2.0;BlueOak-1.0.0;BSD-2-Clause;BSD-3-Clause;ISC;MIT;"
+
+  linter:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          check-latest: true
+          node-version: lts/*
+
+      - name: Install dependencies
+        run: npm i --ignore-scripts
+
+      - name: Lint code
+        run: npm run lint
+
+  # Inlined from fastify/workflows/.github/workflows/plugins-ci.yml@v5.
+  # The reusable-workflow caller job could not declare timeout-minutes, so the
+  # matrix is inlined verbatim (default node-versions ["20", "22", "24"]).
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20", "22", "24"]
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          check-latest: true
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm i --ignore-scripts
+
+      - name: Run tests
+        run: npm test
+
+  pack:
+    name: Pack release tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          check-latest: true
+          node-version: '23'
+
+      - name: Pack
+        run: |
+          npm pack
+          mv fastify-static-8.3.0.tgz static-8.3.0.tgz
+          ls -l static-8.3.0.tgz
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: static-8.3.0.tgz
+          if-no-files-found: error

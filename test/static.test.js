@@ -1444,7 +1444,7 @@ test('with fastify-compress', async t => {
   const pluginOptions = {
     root: path.join(__dirname, '/static')
   }
-  const fastify = Fastify()
+  const fastify = Fastify({ forceCloseConnections: true })
   fastify.register(compress, { threshold: 0 })
   fastify.register(fastifyStatic, pluginOptions)
 
