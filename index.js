@@ -232,6 +232,7 @@ async function fastifyStatic (fastify, opts) {
     checkedEncodings
   ) {
     const pathnameOrig = pathname
+    const normalizedPathname = normalizeRequestPathname(pathname)
     const options = Object.assign({}, sendOptions, pumpOptions)
 
     if (rootPath) {
@@ -250,7 +251,7 @@ async function fastifyStatic (fastify, opts) {
       return reply.send(forbiddenPathError())
     }
 
-    if (allowedPath && !allowedPath(pathname, options.root, request)) {
+    if (allowedPath && !allowedPath(normalizedPathname, options.root, request)) {
       return reply.callNotFound()
     }
 
@@ -544,6 +545,18 @@ function forbiddenPathError () {
   error.status = 403
   error.statusCode = 403
   return error
+}
+
+/**
+ * @param {string} pathname
+ * @returns {string}
+ */
+function normalizeRequestPathname (pathname) {
+  if (!pathname.startsWith('/')) {
+    return pathname
+  }
+
+  return path.posix.normalize(pathname)
 }
 
 /**
