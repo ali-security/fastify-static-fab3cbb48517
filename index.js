@@ -13,6 +13,8 @@ const dirList = require('./lib/dirList')
 
 const endForwardSlashRegex = /\/$/u
 const asteriskRegex = /\*/gu
+const dotDotSegmentRegex = /(?:^|[\\/])\.\.(?:[\\/]|$)/u
+const leadingDotDotSegmentRegex = /^\/?\.\.(?:[\\/]|$)/u
 
 const supportedEncodings = ['br', 'gzip', 'deflate']
 send.mime.default_type = 'application/octet-stream'
@@ -127,7 +129,10 @@ async function fastifyStatic (fastify, opts) {
           matchRoutePrefix ??= createRoutePrefixMatcher(req.routeOptions.url)
 
           const pathname = getPathnameForSend(req.raw.url, matchRoutePrefix)
-          if (!pathname) {
+          if (pathname === null) {
+            return reply.send(forbiddenPathError())
+          }
+          if (pathname === undefined) {
             return reply.callNotFound()
           }
 
@@ -237,6 +242,12 @@ async function fastifyStatic (fastify, opts) {
       }
     } else if (path.isAbsolute(pathname) === false) {
       return reply.callNotFound()
+    }
+
+    // @fastify/send rejects leading ".." segments, but it normalizes
+    // non-leading ones away before its guard runs.
+    if (dotDotSegmentRegex.test(pathname) && !leadingDotDotSegmentRegex.test(pathname)) {
+      return reply.send(forbiddenPathError())
     }
 
     if (allowedPath && !allowedPath(pathname, options.root, request)) {
@@ -526,6 +537,16 @@ function getContentType (path) {
 }
 
 /**
+ * @returns {Error & { status?: number, statusCode?: number }}
+ */
+function forbiddenPathError () {
+  const error = new Error('Forbidden')
+  error.status = 403
+  error.statusCode = 403
+  return error
+}
+
+/**
  * @param {string} pathname
  * @param {*} root
  * @param {import("./types").FastifyStaticOptions['index']} [indexFiles]
@@ -660,7 +681,7 @@ function createRoutePrefixMatcher (route) {
 /**
  * @param {string} url
  * @param {(pathname: string, pathnameEnd: number) => number|undefined} matchRoutePrefix
- * @returns {string|undefined}
+ * @returns {string|null|undefined}
  */
 function getPathnameForSend (url, matchRoutePrefix) {
   const questionMark = url.indexOf('?')
@@ -680,7 +701,16 @@ function getPathnameForSend (url, matchRoutePrefix) {
   }
 
   try {
-    return decodeURI(pathname)
+    const decodedUrlPathname = decodeURI(url.slice(0, pathnameEnd))
+    const decodedPathname = decodeURI(pathname)
+
+    // Check the full raw URL path, because route params can consume a
+    // dot-dot segment before the suffix is passed to @fastify/send.
+    if (dotDotSegmentRegex.test(decodedUrlPathname) && !leadingDotDotSegmentRegex.test(decodedPathname)) {
+      return null
+    }
+
+    return decodedPathname
   } catch {
 
   }
